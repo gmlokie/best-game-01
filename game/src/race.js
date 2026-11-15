@@ -1,8 +1,13 @@
 // NEON RUSH — race state machine.
-// Menu -> countdown -> racing -> results, plus pause and restart. Owns the
-// karts, the AI drivers, lap + checkpoint validation, boost pads, standings,
-// and the race clock. The clock only advances during racing, and every step
-// is a fixed dt, so a race is fully reproducible from its seed.
+// Menu -> countdown -> racing -> results, plus pause, restart, and the
+// Neon League flow (results -> season shop -> next race -> champion).
+// Owns the karts, the AI drivers, lap + checkpoint validation, boost pads,
+// standings, and the race clock. The clock only advances during racing,
+// and every step is a fixed dt, so a race is fully reproducible from its
+// seed. Modes:
+//   single — one race on one track, default PRO difficulty.
+//   league — a 3-race season over all three tracks, championship points,
+//     credits, and a shop between races (see league.js).
 
 import { makeRng, range } from './rng.js';
 import {
@@ -12,6 +17,9 @@ import {
   BOOST_PADS,
   LAP_COUNT,
   elevationAt,
+  loadTrack,
+  applyPadLayout,
+  padLayoutsForRace,
 } from './track.js';
 import {
   makeKart,
@@ -21,6 +29,17 @@ import {
   PHYSICS,
 } from './physics.js';
 import { makeAiDriver, aiInput, rubberBandFor } from './ai.js';
+import {
+  DIFFICULTIES,
+  POINTS_TABLE,
+  makeLeague,
+  awardRace,
+  buyUpgrade,
+  applyUpgrades,
+  championIndex,
+  loadUnlocks,
+  unlockTrack,
+} from './league.js';
 import {
   makeParticles,
   stepParticles,
@@ -42,7 +61,7 @@ import {
   playFanfare,
   toggleMute,
 } from './audio.js';
-import { drivingInput, wasPressed, wasAnyKey, clearPresses } from './input.js';
+import { drivingInput, wasPressed } from './input.js';
 
 export const RACE_SEED = 1337;
 
@@ -57,17 +76,43 @@ export const KART_DEFS = [
   { name: 'COMET', color: '#ffe66d', player: false },
 ];
 
-export function makeRace(seed) {
+// Wind (B8): a slow lateral drift, a pure function of race time so it
+// stays deterministic. Max ~18 px/s — the AI and the player both steer
+// against it, so it reads as a handling variable, not a shove.
+export function windAt(t) {
+  return { x: 18 * Math.sin(t * 0.31), y: 18 * Math.cos(t * 0.23) };
+}
+
+export function makeRace(seed, options) {
+  const opts = {
+    trackIndex: 0,
+    difficulty: 1, // PRO
+    upgrades: null,
+    mode: 'single',
+    league: null,
+    ...(options || {}),
+  };
+  loadTrack(opts.trackIndex);
+  const difficulty = DIFFICULTIES[opts.difficulty] || DIFFICULTIES[1];
   const rng = makeRng(seed);
   const karts = KART_DEFS.map((def, i) => {
     const kart = makeKart(i, def.name, def.color, def.player);
     // Skill varies per kart but stays close: the field is competitive, and
     // the player kart is mid-pack on raw pace so driving matters.
-    kart.skill = {
-      topSpeed: def.player ? 1.0 : range(rng, 0.93, 1.0),
-      corner: def.player ? 1.0 : range(rng, 0.9, 1.04),
-      accel: def.player ? 1.0 : range(rng, 0.94, 1.02),
-    };
+    // Difficulty sets the AI ranges; the player is always 1.0 base, plus
+    // any league upgrades bought between races.
+    if (def.player) {
+      kart.skill = { topSpeed: 1, corner: 1, accel: 1, handling: 1, boost: 1 };
+      if (opts.upgrades) kart.skill = applyUpgrades(kart.skill, opts.upgrades);
+    } else {
+      kart.skill = {
+        topSpeed: range(rng, difficulty.ai.topSpeed[0], difficulty.ai.topSpeed[1]),
+        corner: range(rng, difficulty.ai.corner[0], difficulty.ai.corner[1]),
+        accel: range(rng, difficulty.ai.accel[0], difficulty.ai.accel[1]),
+        handling: 1,
+        boost: 1,
+      };
+    }
     return kart;
   });
   // Grid order is shuffled (seeded) so the player does not always start last.
@@ -81,9 +126,15 @@ export function makeRace(seed) {
   }
   order.forEach((kartId, slot) => placeOnGrid(karts[kartId], slot));
   const drivers = karts.map((kart) => makeAiDriver(kart, 11 + kart.id * 7));
+  // Boost pads shift every lap (B8): one seeded layout per lap.
+  const padLayouts = padLayoutsForRace(seed, LAP_COUNT);
+  applyPadLayout(padLayouts[0]);
   return {
     seed,
-    state: 'menu', // menu | countdown | racing | paused | results
+    options: opts,
+    difficulty,
+    laps: LAP_COUNT,
+    state: 'menu', // menu | countdown | racing | paused | results | season | champion
     prevState: 'racing',
     karts,
     drivers,
@@ -101,6 +152,15 @@ export function makeRace(seed) {
     messageT: 0,
     autoDrive: false, // headless test mode: the player kart is AI-driven
     frame: 0,
+    wind: { x: 0, y: 0 },
+    padLayouts,
+    padVersion: 0, // bumps when the pads move, so the renderer repositions them
+    mode: opts.mode,
+    league: opts.league, // league state object, or null in single mode
+    unlocks: loadUnlocks(),
+    resultsData: null, // { position, points, credits, bestLapBonus } after a league race
+    // Menu selection (main.js + hud.js own it; the race never reads it).
+    menuSel: { mode: 'single', trackIndex: 0, difficulty: 1 },
   };
 }
 
@@ -115,7 +175,7 @@ export function startCountdown(race) {
 export function resetRace(race) {
   const keepAudio = race.audio;
   const keepAutoDrive = race.autoDrive;
-  const fresh = makeRace(race.seed);
+  const fresh = makeRace(race.seed, race.options);
   Object.keys(fresh).forEach((key) => {
     race[key] = fresh[key];
   });
@@ -125,6 +185,41 @@ export function resetRace(race) {
   race.state = 'countdown';
   race.countdownT = 3.2;
   race.countdownBeep = 4;
+}
+
+// Advance the league to its next race: new track, same league state and
+// upgrades, fresh karts. Called from the season screen.
+export function nextLeagueRace(race) {
+  const league = race.league;
+  league.raceIndex += 1;
+  league.awarded = false;
+  race.options = {
+    ...race.options,
+    trackIndex: league.trackOrder[league.raceIndex],
+    upgrades: { ...league.upgrades },
+    league,
+  };
+  resetRace(race);
+}
+
+// Back to the title menu (from the champion screen).
+export function backToMenu(race) {
+  const keepAudio = race.audio;
+  const keepAutoDrive = race.autoDrive;
+  const keepMenuSel = race.menuSel;
+  const fresh = makeRace(race.seed, {
+    trackIndex: 0,
+    difficulty: 1,
+    mode: 'single',
+    league: null,
+  });
+  Object.keys(fresh).forEach((key) => {
+    race[key] = fresh[key];
+  });
+  race.audio = keepAudio;
+  race.autoDrive = keepAutoDrive;
+  race.menuSel = keepMenuSel;
+  race.state = 'menu';
 }
 
 // Did the kart move forward across the given track sample this step?
@@ -262,15 +357,17 @@ function spawnKartEffects(race, kart, dt) {
 
 function stepRacing(race, input, dt) {
   race.raceTime += dt;
+  race.wind = windAt(race.raceTime);
   const player = race.player;
   for (const kart of race.karts) {
     kart.rubberBand = kart.isPlayer
       ? 1
-      : rubberBandFor(kart, player.progress);
+      : rubberBandFor(kart, player.progress, race.difficulty);
   }
   for (const kart of race.karts) {
     if (kart.finished) continue;
     const prevSample = kart.sample;
+    const prevLap = kart.lap;
     let kartInput;
     if (kart.isPlayer && !race.autoDrive) {
       kartInput = drivingInput(input);
@@ -279,9 +376,15 @@ function stepRacing(race, input, dt) {
       kartInput = aiInput(driver, race.raceTime, player.progress, race.karts);
     }
     const wasBoosting = kart.boosting;
-    stepKart(kart, kartInput, dt);
+    stepKart(kart, kartInput, dt, race.wind);
     if (kart.boosting && !wasBoosting && kart.isPlayer) playBoostWhoosh(race.audio);
     validateLap(kart, prevSample, race.raceTime);
+    // The player crossed the start line: the boost pads shift to the
+    // next lap's seeded layout (B8). The renderer watches padVersion.
+    if (kart.isPlayer && kart.lap !== prevLap && kart.lap < race.laps) {
+      applyPadLayout(race.padLayouts[kart.lap]);
+      race.padVersion += 1;
+    }
     checkBoostPads(race, kart);
     spawnKartEffects(race, kart, dt);
   }
@@ -323,6 +426,12 @@ function stepRacing(race, input, dt) {
       playFanfare(race.audio);
       race.fanfarePlayed = true;
     }
+    // League: award points + credits once, and unlock the next track.
+    if (race.mode === 'league' && race.league && !race.league.awarded) {
+      race.resultsData = awardRace(race.league, standings(race));
+      if (race.league.raceIndex === 0) race.unlocks = unlockTrack(race.unlocks, 1);
+      if (race.league.raceIndex === 1) race.unlocks = unlockTrack(race.unlocks, 2);
+    }
   }
 }
 
@@ -335,11 +444,10 @@ export function stepRace(race, input, dt) {
     race.messageT = 1.2;
   }
   if (race.state === 'menu') {
+    // The menu itself never starts the race: main.js owns the menu keys
+    // (M/T/D to choose, Enter/Space/click to start) so an option key can
+    // never double as a start. The race just idles its particles here.
     stepParticles(race.particles, dt);
-    if (wasAnyKey(input)) {
-      ensureAudio(race.audio);
-      startCountdown(race);
-    }
     return;
   }
   if (race.state === 'countdown') {
@@ -397,8 +505,37 @@ export function stepRace(race, input, dt) {
       );
     }
     if (wasPressed(input, 'KeyR') || wasPressed(input, 'Enter')) {
-      resetRace(race);
+      if (race.mode === 'league' && race.league) {
+        // Season over after race 3, otherwise the season screen.
+        race.state = race.league.raceIndex >= 2 ? 'champion' : 'season';
+        playClick(race.audio);
+      } else {
+        resetRace(race);
+      }
+    }
+    return;
+  }
+  if (race.state === 'season') {
+    stepParticles(race.particles, dt);
+    // Shop keys: 1/2/3 buy one level of speed/handling/boost.
+    if (wasPressed(input, 'Digit1')) buyUpgrade(race.league, 'speed');
+    if (wasPressed(input, 'Digit2')) buyUpgrade(race.league, 'handling');
+    if (wasPressed(input, 'Digit3')) buyUpgrade(race.league, 'boost');
+    if (wasPressed(input, 'Enter')) {
+      playClick(race.audio);
+      nextLeagueRace(race);
+    }
+    return;
+  }
+  if (race.state === 'champion') {
+    stepParticles(race.particles, dt);
+    if (wasPressed(input, 'KeyR') || wasPressed(input, 'Enter')) {
+      playClick(race.audio);
+      backToMenu(race);
     }
     return;
   }
 }
+
+// Re-export league helpers the HUD needs, so it imports from one place.
+export { POINTS_TABLE, makeLeague, championIndex };

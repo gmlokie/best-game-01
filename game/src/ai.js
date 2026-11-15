@@ -28,12 +28,16 @@ export function makeAiDriver(kart, skillSeed) {
 
 // Where the kart wants to be, a few samples ahead of its current position.
 // Returns a world point on (or near) the centreline.
+// The lookahead shrinks on twisty sections: aiming 11+ samples ahead
+// across a tight S cuts the chord into the inside wall and stalls the kart
+// there, so on a sharp bend the AI only looks a few samples ahead.
 export function aiTargetPoint(driver, time) {
   const kart = driver.kart;
-  // Short lookahead on twisty sections so the kart follows the curve
-  // instead of cutting the chord into the inside wall; longer on straights.
   const bend = curvatureAhead(kart.sample, 20);
-  const lookahead = bend > 0.2 ? 11 : 14 + Math.floor(Math.abs(kart.speed) / 45);
+  let lookahead;
+  if (bend > 0.35) lookahead = 7;
+  else if (bend > 0.2) lookahead = 9;
+  else lookahead = 14 + Math.floor(Math.abs(kart.speed) / 45);
   const targetSample = (kart.sample + lookahead) % TRACK_SAMPLES;
   const p = TRACK_POINTS[targetSample];
   // Gentle sinusoidal wobble so the AI line looks alive, not robotic.
@@ -84,8 +88,10 @@ export function aiInput(driver, time, playerProgress, rivals) {
   if (kart.offTrack) throttle = 1; // floor it to get back on the asphalt
 
   // Drift through sharp corners: hold drift while turning hard at speed.
+  // Never drift on a very tight bend: the slide pushes the kart into the
+  // inside wall and it stalls there instead of rotating through.
   const bend = curvatureAhead(kart.sample, 18);
-  const drift = bend > 0.22 && Math.abs(steer) > 0.55 && kart.speed > 260;
+  const drift = bend > 0.22 && bend <= 0.35 && Math.abs(steer) > 0.55 && kart.speed > 260;
 
   // Boost: spend the meter on the straight after a corner, or when far behind.
   const behind = playerProgress - kart.progress;
@@ -112,11 +118,14 @@ function nearestRivalAhead(kart, rivals) {
   return best;
 }
 
-// Rubber-band factor for one AI kart: 1.0 at the player's pace, up to +9%
-// when well behind, down to -7% when well ahead. Gentle on purpose — the
-// player should feel the pack breathe, not teleport.
-export function rubberBandFor(kart, playerProgress) {
+// Rubber-band factor for one AI kart: 1.0 at the player's pace, up to
+// rubberMax when well behind, down to rubberMin when well ahead. Gentle
+// on purpose — the player should feel the pack breathe, not teleport.
+// difficulty: a DIFFICULTIES entry (or null for PRO defaults).
+export function rubberBandFor(kart, playerProgress, difficulty) {
+  const max = (difficulty && difficulty.rubberMax) || 1.09;
+  const min = (difficulty && difficulty.rubberMin) || 0.93;
   const diff = playerProgress - kart.progress;
-  if (diff > 0) return Math.min(1.09, 1 + diff / 6000);
-  return Math.max(0.93, 1 + diff / 9000);
+  if (diff > 0) return Math.min(max, 1 + diff / 6000);
+  return Math.max(min, 1 + diff / 9000);
 }

@@ -6,13 +6,14 @@
 import {
   TRACK_POINTS,
   TRACK_SAMPLES,
+  TRACK_LENGTH,
   TRACK_HALF_WIDTH,
   nearestSample,
   closestPoint,
   lateralOffset,
 } from './track.js';
 
-export const KART_RADIUS = 14;
+export const KART_RADIUS = 17;
 
 // Tuning knobs, one place, so the race stays fair and fun to drive.
 export const PHYSICS = {
@@ -65,7 +66,7 @@ export function makeKart(id, name, color, isPlayer) {
     raceTime: 0,
     wallHit: 0, // cooldown so one scrape sparks once
     padCooldown: 0,
-    skill: { topSpeed: 1, corner: 1, accel: 1 },
+    skill: { topSpeed: 1, corner: 1, accel: 1, handling: 1, boost: 1 },
     rubberBand: 1,
     smokeTimer: 0,
   };
@@ -78,8 +79,9 @@ export function placeOnGrid(kart, gridSlot) {
   const side = gridSlot % 2 === 0 ? -1 : 1;
   const back = 46 + row * 44;
   // Grid slots sit behind the start line, so their sample index wraps to
-  // the end of the table (about 9 px of track per sample).
-  const sampleIndex = (TRACK_SAMPLES - Math.round(back / 9)) % TRACK_SAMPLES;
+  // the end of the table (one sample spans TRACK_LENGTH/TRACK_SAMPLES px).
+  const sampleIndex =
+    (TRACK_SAMPLES - Math.round(back / (TRACK_LENGTH / TRACK_SAMPLES))) % TRACK_SAMPLES;
   const p = TRACK_POINTS[sampleIndex];
   const lat = side * 26;
   kart.x = p.x - p.ty * lat;
@@ -95,7 +97,9 @@ export function placeOnGrid(kart, gridSlot) {
 
 // One fixed step of driving for a single kart.
 // input: { throttle: -1..1, steer: -1..1, drift: bool, boost: bool }
-export function stepKart(kart, input, dt) {
+// wind: { x, y } lateral drift in px/s (B8 — a pure function of race time,
+// so it stays deterministic); pass null for still air.
+export function stepKart(kart, input, dt, wind) {
   const P = PHYSICS;
   const boosting = kart.boostTime > 0 || (input.boost && kart.boostMeter > 0.02);
   kart.boosting = boosting;
@@ -104,7 +108,7 @@ export function stepKart(kart, input, dt) {
   const targetSteer = input.steer;
   kart.steer += (targetSteer - kart.steer) * Math.min(1, dt * 10);
   const speedFactor = Math.min(1, Math.abs(kart.speed) / 120);
-  let yawRate = kart.steer * P.steerRate * speedFactor;
+  let yawRate = kart.steer * P.steerRate * (kart.skill.handling || 1) * speedFactor;
   if (kart.speed < 0) yawRate = -yawRate;
 
   // --- drift: hold drift while steering hard at speed; charging builds meter ---
@@ -137,10 +141,11 @@ export function stepKart(kart, input, dt) {
   }
 
   // --- longitudinal forces ---
-  const topSpeed = (boosting ? P.boostMaxSpeed : P.maxSpeed) * kart.skill.topSpeed;
+  const boostTop = P.boostMaxSpeed * (kart.skill.boost || 1);
+  const topSpeed = (boosting ? boostTop : P.maxSpeed) * kart.skill.topSpeed;
   if (input.throttle > 0) {
     kart.speed += P.accel * kart.skill.accel * input.throttle * dt;
-    if (boosting) kart.speed += P.boostAccel * dt;
+    if (boosting) kart.speed += P.boostAccel * (kart.skill.boost || 1) * dt;
   } else if (input.throttle < 0) {
     if (kart.speed > 5) kart.speed -= P.brake * dt;
     else kart.speed += P.reverseAccel * input.throttle * dt; // reversing
@@ -171,6 +176,12 @@ export function stepKart(kart, input, dt) {
   const moveAngle = kart.angle + slide * speedFactor;
   kart.x += Math.cos(moveAngle) * kart.speed * dt;
   kart.y += Math.sin(moveAngle) * kart.speed * dt;
+  // Wind drift (B8): a slow lateral push, applied before the wall clamp
+  // so a kart can never be blown through the barrier.
+  if (wind) {
+    kart.x += wind.x * dt;
+    kart.y += wind.y * dt;
+  }
 
   // --- walls: clamp to the track edge, bleed speed, flag a scrape ---
   // The clamp projects onto the nearest track segment (closestPoint), so a

@@ -9,6 +9,11 @@
 // Coordinate mapping: the 2D track plan (x, y) becomes world (x, up, -y),
 // and a plan heading angle maps straight to rotation.y, so the 2D logic
 // files never change.
+//
+// Track switching: everything that depends on the active track lives in
+// one group, built by buildTrackGroup(). rebuildTrack() drops that group
+// and builds a fresh one from the current track tables, so a league race
+// on a new circuit reuses the same renderer, karts, sky, and lights.
 
 import * as THREE from 'three';
 import {
@@ -44,7 +49,7 @@ function makeGridTexture() {
   const g = c.getContext('2d');
   g.fillStyle = '#0a0618';
   g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = 'rgba(124, 92, 255, 0.28)';
+  g.strokeStyle = 'rgba(124, 92, 255, 0.38)';
   g.lineWidth = 2;
   for (let i = 0; i <= 256; i += 32) {
     g.beginPath();
@@ -94,6 +99,33 @@ function makeWindowTexture() {
       g.fillRect(x, y, 9, 11);
     }
   }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Neon billboard texture: gradient + word, drawn once, reused by every
+// billboard. The words cycle through a fixed list, so each board reads
+// differently while sharing one texture.
+function makeBillboardTexture(word) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 96;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 256, 0);
+  grad.addColorStop(0, '#ff2e88');
+  grad.addColorStop(0.5, '#7c5cff');
+  grad.addColorStop(1, '#22d3ee');
+  g.fillStyle = '#0a0618';
+  g.fillRect(0, 0, 256, 96);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 6);
+  g.fillRect(0, 90, 256, 6);
+  g.font = 'bold 44px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = '#ffffff';
+  g.fillText(word, 128, 50);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -165,16 +197,22 @@ function makeTrackMesh() {
     uvs[uo + 3] = 1;
     const a = i * 2;
     const b = ((i + 1) % n) * 2;
-    indices.push(a, b, a + 1, b, b + 1, a + 1);
+    // Winding (a, a+1, b): the front face points UP. The old order
+    // (a, b, a+1) put the normal DOWN, so with FrontSide culling the
+    // whole asphalt was invisible from the chase camera — the karts
+    // looked like they were floating on the ground grid.
+    indices.push(a, a + 1, b, b, a + 1, b + 1);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
+  // Brighter asphalt than the old near-black: the track must read as a
+  // road, not a hole in the ground.
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x1a1338,
-    roughness: 0.85,
+    color: 0x35306b,
+    roughness: 0.75,
     metalness: 0.15,
   });
   const mesh = new THREE.Mesh(geo, mat);
@@ -182,31 +220,31 @@ function makeTrackMesh() {
   return mesh;
 }
 
-// A thin glowing ribbon along one track edge. side: +1 left, -1 right.
-function makeEdgeStrip(side, color) {
+// A thin glowing ribbon along the track at a fixed lateral offset.
+// latCenter 0 is the centreline; width is the ribbon's width in px.
+function makeRibbon(latCenter, width, color, yOff) {
   const n = TRACK_SAMPLES;
   const positions = new Float32Array(n * 2 * 3);
   const indices = [];
-  const inset = TRACK_HALF_WIDTH - 2;
-  const width = 3.5;
+  const half = width / 2;
   for (let i = 0; i < n; i += 1) {
     const p = TRACK_POINTS[i];
     const bank = p.bank;
     const lx = -p.ty * Math.cos(bank);
     const lz = -p.tx * Math.cos(bank);
     const up = Math.sin(bank);
-    const inner = inset - width;
     const o = i * 6;
-    // Same banking as the ribbon: the strip on the outer edge sits higher.
-    positions[o] = p.x + lx * side * inset;
-    positions[o + 1] = p.h - up * side * inset + 0.35;
-    positions[o + 2] = -p.y + lz * side * inset;
-    positions[o + 3] = p.x + lx * side * inner;
-    positions[o + 4] = p.h - up * side * inner + 0.35;
-    positions[o + 5] = -p.y + lz * side * inner;
+    positions[o] = p.x + lx * (latCenter + half);
+    positions[o + 1] = p.h - up * (latCenter + half) + yOff;
+    positions[o + 2] = -p.y + lz * (latCenter + half);
+    positions[o + 3] = p.x + lx * (latCenter - half);
+    positions[o + 4] = p.h - up * (latCenter - half) + yOff;
+    positions[o + 5] = -p.y + lz * (latCenter - half);
     const a = i * 2;
     const b = ((i + 1) % n) * 2;
-    indices.push(a, b, a + 1, b, b + 1, a + 1);
+    // Same up-facing winding as the track mesh (see above): the old
+    // order culled both glow edges and the centre line from above.
+    indices.push(a, a + 1, b, b, a + 1, b + 1);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -272,7 +310,154 @@ function buildKartMesh(colorHex) {
   add(KART_GEO.wheel, KART_MAT_TYRE, 10, 4.6, 9.5, Math.PI / 2, 0);
   add(KART_GEO.wheel, KART_MAT_TYRE, -10, 4.6, -9.5, Math.PI / 2, 0);
   add(KART_GEO.wheel, KART_MAT_TYRE, -10, 4.6, 9.5, Math.PI / 2, 0);
+  // Karts read bigger on screen (A3): scale the whole group 1.3x.
+  group.scale.setScalar(1.3);
   return group;
+}
+
+// Build every track-dependent object for the CURRENT track tables.
+// Returns { group, pads, padMat }: the group to add to the scene, the
+// boost-pad meshes (repositioned when the pads shift each lap), and the
+// pad material (pulsed every frame).
+function buildTrackGroup() {
+  const group = new THREE.Group();
+
+  // Track + glow edges + centre line + dashes + start line + boost pads.
+  group.add(makeTrackMesh());
+  group.add(makeRibbon(TRACK_HALF_WIDTH - 2, 3.5, 0x22d3ee, 0.35));
+  group.add(makeRibbon(-(TRACK_HALF_WIDTH - 2), 3.5, 0xff2e88, 0.35));
+  group.add(makeRibbon(0, 2.5, 0x8b7cff, 0.3));
+
+  const dashGeo = new THREE.BoxGeometry(12, 0.3, 3);
+  const dashMat = new THREE.MeshBasicMaterial({ color: 0xf5f0ff });
+  const dashCount = Math.floor(TRACK_SAMPLES / 4);
+  const dashes = new THREE.InstancedMesh(dashGeo, dashMat, dashCount);
+  for (let k = 0; k < dashCount; k += 1) {
+    const i = k * 4;
+    const p = TRACK_POINTS[i];
+    _e1.set(0, p.angle, 0);
+    _q1.setFromEuler(_e1);
+    _v1.set(p.x, p.h + 0.25, -p.y);
+    _m1.compose(_v1, _q1, _v2.set(1, 1, 1));
+    dashes.setMatrixAt(k, _m1);
+  }
+  group.add(dashes);
+
+  const startLineGeo = new THREE.PlaneGeometry(TRACK_HALF_WIDTH * 2, 14);
+  startLineGeo.rotateX(-Math.PI / 2);
+  const startLine = new THREE.Mesh(
+    startLineGeo,
+    new THREE.MeshBasicMaterial({ map: makeCheckerTexture() }),
+  );
+  {
+    const p = TRACK_POINTS[0];
+    startLine.position.set(p.x, p.h + 0.3, -p.y);
+    // Width spans across the track: rotate so local +X is perpendicular
+    // to the track direction.
+    startLine.rotation.y = p.angle + Math.PI / 2;
+  }
+  group.add(startLine);
+
+  const padMat = new THREE.MeshStandardMaterial({
+    color: 0xffb020,
+    emissive: 0xffb020,
+    emissiveIntensity: 1.4,
+    roughness: 0.4,
+  });
+  // Wider, deeper pads: full track width, so they read from the chase cam.
+  const padGeo = new THREE.BoxGeometry(TRACK_HALF_WIDTH * 2, 2, 30);
+  const pads = [];
+  for (const pad of BOOST_PADS) {
+    const mesh = new THREE.Mesh(padGeo, padMat);
+    mesh.position.set(pad.x, TRACK_POINTS[pad.sample].h + 0.4, -pad.y);
+    mesh.rotation.y = pad.angle;
+    group.add(mesh);
+    pads.push(mesh);
+  }
+
+  // Arches over the track: posts + beam + neon strip, every ~60 samples.
+  const archPostGeo = new THREE.CylinderGeometry(3, 3.5, 46, 10);
+  const archBeamGeo = new THREE.BoxGeometry(150, 5, 6);
+  const archStripGeo = new THREE.BoxGeometry(150, 1.2, 1.2);
+  const archPostMat = new THREE.MeshStandardMaterial({
+    color: 0x241a3d,
+    roughness: 0.6,
+    metalness: 0.5,
+  });
+  const archStripMat = new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false });
+  const archSamples = [40, 100, 160, 220, 280, 340, 400, 460];
+  archSamples.forEach((sample, ai) => {
+    const p = TRACK_POINTS[sample];
+    const g = new THREE.Group();
+    const left = new THREE.Mesh(archPostGeo, archPostMat);
+    left.position.set(0, 23, -TRACK_HALF_WIDTH - 8);
+    const right = new THREE.Mesh(archPostGeo, archPostMat);
+    right.position.set(0, 23, TRACK_HALF_WIDTH + 8);
+    const beam = new THREE.Mesh(archBeamGeo, archPostMat);
+    beam.position.set(0, 46, 0);
+    beam.rotation.y = Math.PI / 2;
+    const strip = new THREE.Mesh(archStripGeo, ai % 2 === 0 ? archStripMat : new THREE.MeshBasicMaterial({ color: 0x22d3ee, toneMapped: false }));
+    strip.position.set(0, 49, 0);
+    strip.rotation.y = Math.PI / 2;
+    g.add(left, right, beam, strip);
+    g.position.set(p.x, p.h, -p.y);
+    g.rotation.y = p.angle;
+    group.add(g);
+  });
+
+  // Pylons: instanced posts with glowing tips ringing the outside edge.
+  const pylonCount = 48;
+  const pylonGeo = new THREE.BoxGeometry(4, 26, 4);
+  const pylonMat = new THREE.MeshStandardMaterial({
+    color: 0x1c1440,
+    roughness: 0.6,
+    metalness: 0.4,
+  });
+  const pylons = new THREE.InstancedMesh(pylonGeo, pylonMat, pylonCount);
+  const tipGeo = new THREE.BoxGeometry(5, 2.5, 5);
+  const tipMat = new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false });
+  const tips = new THREE.InstancedMesh(tipGeo, tipMat, pylonCount);
+  for (let k = 0; k < pylonCount; k += 1) {
+    const sample = Math.floor((k * TRACK_SAMPLES) / pylonCount);
+    const p = TRACK_POINTS[sample];
+    const lat = TRACK_HALF_WIDTH + 34;
+    const x = p.x - p.ty * lat;
+    const z = -(p.y + p.tx * lat);
+    _e1.set(0, 0, 0);
+    _q1.setFromEuler(_e1);
+    _v1.set(x, p.h + 13, z);
+    _m1.compose(_v1, _q1, _v2.set(1, 1, 1));
+    pylons.setMatrixAt(k, _m1);
+    _v1.set(x, p.h + 27, z);
+    _m1.compose(_v1, _q1, _v2.set(1, 1, 1));
+    tips.setMatrixAt(k, _m1);
+  }
+  group.add(pylons);
+  group.add(tips);
+
+  // Billboards: glowing word panels just outside the track, facing it.
+  // Fixed words + fixed samples — no randomness, same every run.
+  const words = ['NEON', 'RUSH', 'TURBO', 'DRIFT', 'BOOST', 'NEON', 'RUSH', 'TURBO', 'DRIFT', 'BOOST'];
+  const boardGeo = new THREE.PlaneGeometry(70, 26);
+  for (let k = 0; k < words.length; k += 1) {
+    const sample = Math.floor(((k + 0.5) * TRACK_SAMPLES) / words.length);
+    const p = TRACK_POINTS[sample];
+    const lat = TRACK_HALF_WIDTH + 62;
+    const x = p.x - p.ty * lat;
+    const z = -(p.y + p.tx * lat);
+    const tex = makeBillboardTexture(words[k]);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false });
+    const board = new THREE.Mesh(boardGeo, mat);
+    board.position.set(x, p.h + 18, z);
+    // Face ONCOMING karts (normal = -tangent): the chase camera looks
+    // forward from behind the kart, so a board facing down-track shows
+    // its mirrored back. p.angle - PI/2 turns the front toward the
+    // approaching field, and the text reads correctly.
+    board.rotation.y = p.angle - Math.PI / 2;
+    group.add(board);
+  }
+
+  return { group, pads, padMat };
 }
 
 export function createRenderer(canvas) {
@@ -285,16 +470,16 @@ export function createRenderer(canvas) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
+  renderer.toneMappingExposure = 1.22;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x1a0b2e, 500, 2800);
+  scene.fog = new THREE.Fog(0x1a0b2e, 600, 5200);
   scene.add(makeSky());
 
   // Lights: warm low sun + cool hemisphere fill.
-  const hemi = new THREE.HemisphereLight(0x8a7cff, 0x1a0b2e, 0.85);
+  const hemi = new THREE.HemisphereLight(0x8a7cff, 0x1a0b2e, 1.05);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffd9a0, 2.4);
+  const sun = new THREE.DirectionalLight(0xffd9a0, 2.7);
   sun.castShadow = true;
   sun.position.set(1390, 320, -670);
   sun.target.position.set(1170, 0, -850);
@@ -324,116 +509,34 @@ export function createRenderer(canvas) {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Track + glow edges + centre dashes + start line + boost pads.
-  scene.add(makeTrackMesh());
-  scene.add(makeEdgeStrip(1, 0x22d3ee));
-  scene.add(makeEdgeStrip(-1, 0xff2e88));
-
-  const dashGeo = new THREE.BoxGeometry(9, 0.3, 2.4);
-  const dashMat = new THREE.MeshBasicMaterial({ color: 0xf5f0ff });
-  const dashCount = Math.floor(TRACK_SAMPLES / 4);
-  const dashes = new THREE.InstancedMesh(dashGeo, dashMat, dashCount);
-  for (let k = 0; k < dashCount; k += 1) {
-    const i = k * 4;
-    const p = TRACK_POINTS[i];
-    _e1.set(0, p.angle, 0);
-    _q1.setFromEuler(_e1);
-    _v1.set(p.x, p.h + 0.25, -p.y);
-    _m1.compose(_v1, _q1, _v2.set(1, 1, 1));
-    dashes.setMatrixAt(k, _m1);
+  // Track-dependent objects, rebuilt on track switches.
+  let trackGroup = null;
+  let padMeshes = [];
+  let padMat = null;
+  let lastPadVersion = -1;
+  function installTrackGroup() {
+    if (trackGroup) {
+      scene.remove(trackGroup);
+      trackGroup.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+          else obj.material.dispose();
+          if (obj.material.map) obj.material.map.dispose();
+        }
+      });
+    }
+    const built = buildTrackGroup();
+    trackGroup = built.group;
+    padMeshes = built.pads;
+    padMat = built.padMat;
+    lastPadVersion = -1;
+    scene.add(trackGroup);
   }
-  scene.add(dashes);
-
-  const startLineGeo = new THREE.PlaneGeometry(TRACK_HALF_WIDTH * 2, 14);
-  startLineGeo.rotateX(-Math.PI / 2);
-  const startLine = new THREE.Mesh(
-    startLineGeo,
-    new THREE.MeshBasicMaterial({ map: makeCheckerTexture() }),
-  );
-  {
-    const p = TRACK_POINTS[0];
-    startLine.position.set(p.x, p.h + 0.3, -p.y);
-    // Width spans across the track: rotate so local +X is perpendicular
-    // to the track direction.
-    startLine.rotation.y = p.angle + Math.PI / 2;
-  }
-  scene.add(startLine);
-
-  const padMat = new THREE.MeshStandardMaterial({
-    color: 0xffb020,
-    emissive: 0xffb020,
-    emissiveIntensity: 0.9,
-    roughness: 0.4,
-  });
-  const padGeo = new THREE.BoxGeometry(TRACK_HALF_WIDTH * 2 - 16, 1.2, 22);
-  for (const pad of BOOST_PADS) {
-    const mesh = new THREE.Mesh(padGeo, padMat);
-    mesh.position.set(pad.x, TRACK_POINTS[pad.sample].h + 0.4, -pad.y);
-    mesh.rotation.y = pad.angle;
-    scene.add(mesh);
-  }
-
-  // Arches over the track: posts + beam + neon strip, every ~80 samples.
-  const archPostGeo = new THREE.CylinderGeometry(3, 3.5, 46, 10);
-  const archBeamGeo = new THREE.BoxGeometry(150, 5, 6);
-  const archStripGeo = new THREE.BoxGeometry(150, 1.2, 1.2);
-  const archPostMat = new THREE.MeshStandardMaterial({
-    color: 0x241a3d,
-    roughness: 0.6,
-    metalness: 0.5,
-  });
-  const archStripMat = new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false });
-  const archSamples = [40, 120, 200, 280, 360, 440];
-  archSamples.forEach((sample, ai) => {
-    const p = TRACK_POINTS[sample];
-    const group = new THREE.Group();
-    const left = new THREE.Mesh(archPostGeo, archPostMat);
-    left.position.set(0, 23, -TRACK_HALF_WIDTH - 8);
-    const right = new THREE.Mesh(archPostGeo, archPostMat);
-    right.position.set(0, 23, TRACK_HALF_WIDTH + 8);
-    const beam = new THREE.Mesh(archBeamGeo, archPostMat);
-    beam.position.set(0, 46, 0);
-    beam.rotation.y = Math.PI / 2;
-    const strip = new THREE.Mesh(archStripGeo, ai % 2 === 0 ? archStripMat : new THREE.MeshBasicMaterial({ color: 0x22d3ee, toneMapped: false }));
-    strip.position.set(0, 49, 0);
-    strip.rotation.y = Math.PI / 2;
-    group.add(left, right, beam, strip);
-    group.position.set(p.x, p.h, -p.y);
-    group.rotation.y = p.angle;
-    scene.add(group);
-  });
-
-  // Pylons: instanced posts with glowing tips ringing the outside edge.
-  const pylonCount = 32;
-  const pylonGeo = new THREE.BoxGeometry(4, 26, 4);
-  const pylonMat = new THREE.MeshStandardMaterial({
-    color: 0x1c1440,
-    roughness: 0.6,
-    metalness: 0.4,
-  });
-  const pylons = new THREE.InstancedMesh(pylonGeo, pylonMat, pylonCount);
-  const tipGeo = new THREE.BoxGeometry(5, 2.5, 5);
-  const tipMat = new THREE.MeshBasicMaterial({ color: 0xff2e88, toneMapped: false });
-  const tips = new THREE.InstancedMesh(tipGeo, tipMat, pylonCount);
-  for (let k = 0; k < pylonCount; k += 1) {
-    const sample = Math.floor((k * TRACK_SAMPLES) / pylonCount);
-    const p = TRACK_POINTS[sample];
-    const lat = TRACK_HALF_WIDTH + 34;
-    const x = p.x - p.ty * lat;
-    const z = -(p.y + p.tx * lat);
-    _e1.set(0, 0, 0);
-    _q1.setFromEuler(_e1);
-    _v1.set(x, p.h + 13, z);
-    _m1.compose(_v1, _q1, _v2.set(1, 1, 1));
-    pylons.setMatrixAt(k, _m1);
-    _v1.set(x, p.h + 27, z);
-    _m1.compose(_v1, _q1, _v2.set(1, 1, 1));
-    tips.setMatrixAt(k, _m1);
-  }
-  scene.add(pylons);
-  scene.add(tips);
+  installTrackGroup();
 
   // City skyline: deterministic ring of towers outside the circuit.
+  // Radius clears the largest track (Sunset Bay, ~2,230 px from centre).
   const windowTex = makeWindowTexture();
   const towerMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -447,9 +550,9 @@ export function createRenderer(canvas) {
   const towerGeo = new THREE.BoxGeometry(1, 1, 1);
   const centerX = 1170;
   const centerZ = -850;
-  for (let k = 0; k < 20; k += 1) {
-    const angle = (k / 20) * Math.PI * 2 + (k % 3) * 0.11;
-    const radius = 1350 + ((k * 137) % 420);
+  for (let k = 0; k < 24; k += 1) {
+    const angle = (k / 24) * Math.PI * 2 + (k % 3) * 0.11;
+    const radius = 2500 + ((k * 137) % 420);
     const w = 90 + ((k * 53) % 90);
     const hgt = 90 + ((k * 97) % 220);
     const tower = new THREE.Mesh(towerGeo, towerMat);
@@ -522,17 +625,19 @@ export function createRenderer(canvas) {
         // straight, the arches, and the skyline behind them.
         const fx = Math.cos(player.angle);
         const fz = -Math.sin(player.angle);
-        _v1.set(player.x - fx * 135, elev + 58, -player.y - fz * 135);
+        _v1.set(player.x - fx * 110, elev + 48, -player.y - fz * 110);
         _v2.set(player.x + fx * 110, elev + 4, -player.y + fz * 110);
         camState.pos.copy(_v1);
         camState.look.copy(_v2);
       } else {
         // Slow orbit around the circuit centre, driven by the fixed clock.
+        // Radius clears the largest track, so the orbit never dives
+        // through the ribbon.
         const t = race.frame * STEP;
         const cx = 1170;
         const cz = -850;
         const orbit = 0.12 * t;
-        _v1.set(cx + Math.cos(orbit) * 850, 300, cz + Math.sin(orbit) * 850);
+        _v1.set(cx + Math.cos(orbit) * 1500, 450, cz + Math.sin(orbit) * 1500);
         _v2.set(cx, 0, cz);
         camState.pos.lerp(_v1, 0.04);
         camState.look.lerp(_v2, 0.06);
@@ -543,12 +648,12 @@ export function createRenderer(canvas) {
       camera.updateProjectionMatrix();
       return;
     }
-    if (race.state === 'results') {
+    if (race.state === 'results' || race.state === 'season' || race.state === 'champion') {
       // Gentle orbit around the player's kart.
       const t = race.frame * STEP;
       const px = player.x;
       const pz = -player.y;
-      _v1.set(px + Math.cos(t * 0.25) * 150, elev + 70, pz + Math.sin(t * 0.25) * 150);
+      _v1.set(px + Math.cos(t * 0.25) * 120, elev + 55, pz + Math.sin(t * 0.25) * 120);
       _v2.set(px, elev + 4, pz);
       if (shotMode) {
         camState.pos.copy(_v1);
@@ -564,10 +669,11 @@ export function createRenderer(canvas) {
       return;
     }
     // Chase cam: behind and above the player kart, looking ahead.
+    // Closer and lower than before (A3) so the kart always reads.
     const fx = Math.cos(player.angle);
     const fz = -Math.sin(player.angle);
-    const dist = 92;
-    const height = 40;
+    const dist = 76;
+    const height = 32;
     _v1.set(player.x - fx * dist, elev + height, -player.y - fz * dist);
     _v2.set(player.x + fx * 70, elev + 5, -player.y + fz * 70);
     // Screen shake: deterministic wobble from the fixed frame counter.
@@ -585,7 +691,7 @@ export function createRenderer(canvas) {
     camera.position.copy(camState.pos);
     camera.lookAt(camState.look);
     const speedNorm = Math.abs(player.speed) / 720;
-    const targetFov = 62 + speedNorm * 8 + (player.boosting ? 9 : 0);
+    const targetFov = 64 + speedNorm * 8 + (player.boosting ? 9 : 0);
     camera.fov += (targetFov - camera.fov) * (shotMode ? 1 : 0.12);
     camera.updateProjectionMatrix();
     // The sun's shadow camera follows the player so shadows stay crisp.
@@ -662,17 +768,29 @@ export function createRenderer(canvas) {
     setShotMode(value) {
       shotMode = value;
     },
+    rebuildTrack() {
+      installTrackGroup();
+    },
     resize(w, h) {
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
     },
     render(race) {
+      // Boost pads shifted this lap: move the pad meshes to the new spots.
+      if (race.padVersion !== lastPadVersion) {
+        for (let i = 0; i < padMeshes.length && i < BOOST_PADS.length; i += 1) {
+          const pad = BOOST_PADS[i];
+          padMeshes[i].position.set(pad.x, TRACK_POINTS[pad.sample].h + 0.4, -pad.y);
+          padMeshes[i].rotation.y = pad.angle;
+        }
+        lastPadVersion = race.padVersion;
+      }
       updateCamera(race);
       updateKarts(race);
       updateParticles(race);
       // Boost pads pulse with the fixed race clock.
-      padMat.emissiveIntensity = 0.65 + 0.35 * Math.sin(race.raceTime * 5);
+      if (padMat) padMat.emissiveIntensity = 1.15 + 0.45 * Math.sin(race.raceTime * 5);
       renderer.render(scene, camera);
     },
   };
