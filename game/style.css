@@ -1,0 +1,379 @@
+/* NEON RUSH — page and HUD styling.
+   The 3D scene is WebGL; this file styles the DOM HUD on top of it: big
+   high-contrast numbers, a neon palette (cyan + magenta on near-black), and
+   full-screen menu / pause / results overlays. No external fonts or images —
+   system fonts only, so the game loads with zero network requests. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #070213;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #f5f0ff;
+}
+
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+}
+
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(7, 2, 19, 0.72);
+  color: #a89fd6;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  z-index: 30;
+}
+
+/* ---------- HUD (during a race) ---------- */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#pos-block {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  text-shadow: 0 0 14px rgba(34, 211, 238, 0.8);
+}
+
+#pos {
+  font-size: 46px;
+  font-weight: 800;
+  line-height: 1;
+  color: #f5f0ff;
+}
+
+#pos.podium {
+  color: #ffe66d;
+}
+
+#pos-total {
+  display: inline-block;
+  font-size: 18px;
+  font-weight: 700;
+  color: #a89fd6;
+}
+
+#lap {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #a89fd6;
+}
+
+#time-block {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+
+#time {
+  font-size: 27px;
+  font-weight: 800;
+}
+
+#best {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #a89fd6;
+}
+
+#tower {
+  position: absolute;
+  top: 92px;
+  right: 18px;
+  width: 168px;
+  padding: 8px 10px;
+  background: rgba(7, 2, 19, 0.72);
+  border-radius: 8px;
+}
+
+#tower-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#tower-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: #d9d2f5;
+}
+
+#tower-list li.me {
+  color: #fff;
+  font-weight: 800;
+}
+
+#tower-list .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+#tower-list .tname {
+  flex: 1;
+}
+
+#tower-list .tgap {
+  color: #a89fd6;
+  font-weight: 600;
+}
+
+#speed-block {
+  position: absolute;
+  right: 20px;
+  bottom: 34px;
+  text-align: right;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+
+#speed {
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+#speed-unit {
+  font-size: 14px;
+  font-weight: 700;
+  color: #a89fd6;
+}
+
+#boost-label {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f5f0ff;
+}
+
+#boost-bar {
+  width: 190px;
+  height: 12px;
+  margin-top: 4px;
+  margin-left: auto;
+  background: rgba(245, 240, 255, 0.18);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#boost-fill {
+  height: 100%;
+  width: 40%;
+  background: #22d3ee;
+  transition: width 0.08s linear;
+}
+
+#boost-fill.full {
+  background: #ffe66d;
+}
+
+#offtrack {
+  position: absolute;
+  right: 20px;
+  bottom: 150px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #ff5e78;
+  text-shadow: 0 0 12px rgba(255, 94, 120, 0.9);
+}
+
+#minimap {
+  position: absolute;
+  left: 18px;
+  bottom: 34px;
+  background: rgba(7, 2, 19, 0.72);
+  border-radius: 8px;
+}
+
+#toast {
+  position: fixed;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 34px;
+  font-weight: 800;
+  color: #ffe66d;
+  text-shadow: 0 0 18px rgba(255, 46, 136, 0.9);
+  z-index: 20;
+  pointer-events: none;
+}
+
+#countdown {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 120px;
+  font-weight: 800;
+  color: #ffe66d;
+  text-shadow: 0 0 34px rgba(255, 46, 136, 0.9);
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* ---------- Full-screen overlays ---------- */
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: rgba(5, 2, 19, 0.62);
+  z-index: 15;
+  padding: 20px;
+}
+
+.screen h1 {
+  margin: 0;
+  font-size: 72px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #22d3ee;
+  text-shadow: 0 0 30px rgba(34, 211, 238, 0.9);
+}
+
+.screen h1.gold {
+  color: #ffe66d;
+  text-shadow: 0 0 30px rgba(255, 230, 109, 0.9);
+}
+
+.screen h2 {
+  margin: 6px 0 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: #ff2e88;
+  text-shadow: 0 0 18px rgba(255, 46, 136, 0.8);
+}
+
+.screen .tagline {
+  margin: 14px 0 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: #f5f0ff;
+}
+
+.screen .controls {
+  margin-top: 26px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #d9d2f5;
+}
+
+.screen .controls p {
+  margin: 8px 0;
+}
+
+.screen .press {
+  margin: 30px 0 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffe66d;
+  text-shadow: 0 0 16px rgba(255, 230, 109, 0.8);
+}
+
+.screen .foot {
+  margin: 18px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #a89fd6;
+}
+
+#results.screen {
+  background: rgba(5, 2, 19, 0.78);
+}
+
+#results h1 {
+  font-size: 52px;
+}
+
+#results .tagline {
+  margin-top: 8px;
+}
+
+#results .press {
+  margin-top: 14px;
+  font-size: 20px;
+}
+
+#results-table {
+  width: 620px;
+  max-width: 92vw;
+  margin-top: 12px;
+  text-align: left;
+}
+
+#results-table .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+#results-table .row.me {
+  background: rgba(34, 211, 238, 0.16);
+  font-weight: 800;
+  color: #fff;
+}
+
+#results-table .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex: none;
+}
+
+#results-table .rpos {
+  width: 28px;
+}
+
+#results-table .rname {
+  flex: 1;
+}
+
+#results-table .rlap {
+  color: #a89fd6;
+  font-size: 15px;
+}
+
+#results-table .rtime {
+  width: 110px;
+  text-align: right;
+}

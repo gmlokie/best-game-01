@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NEON RUSH — top-down synthwave circuit racing</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three.module.min.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="game" aria-label="NEON RUSH 3D race canvas"></canvas>
+
+    <div id="hud" style="display: none">
+      <div id="pos-block">
+        <div id="pos">1st</div>
+        <div id="pos-total">/ 8</div>
+        <div id="lap">LAP 1/3</div>
+      </div>
+      <div id="time-block">
+        <div id="time">00:00.000</div>
+        <div id="best">BEST LAP --:--.---</div>
+      </div>
+      <div id="tower"><ol id="tower-list"></ol></div>
+      <div id="speed-block">
+        <div id="speed">0</div>
+        <div id="speed-unit">KM/H</div>
+        <div id="boost-label">BOOST [SPACE]</div>
+        <div id="boost-bar"><div id="boost-fill"></div></div>
+      </div>
+      <div id="offtrack" style="display: none">OFF TRACK!</div>
+      <canvas id="minimap" width="210" height="130"></canvas>
+    </div>
+
+    <div id="toast" style="display: none"></div>
+    <div id="countdown" style="display: none"></div>
+
+    <div id="menu" class="screen" style="display: none">
+      <h1>NEON RUSH</h1>
+      <h2>REAL 3D SYNTHWAVE CIRCUIT RACING</h2>
+      <p class="tagline">8 karts · 3 laps · drift to charge boost · first across the line wins</p>
+      <div class="controls">
+        <p>DRIVE&nbsp;&nbsp;WASD / Arrow keys&nbsp;&nbsp;&nbsp;BOOST&nbsp;&nbsp;Space (when the meter is lit)</p>
+        <p>DRIFT&nbsp;&nbsp;Hold Shift through a corner, release for a burst</p>
+        <p>PAUSE&nbsp;&nbsp;P&nbsp;&nbsp;&nbsp;RESTART&nbsp;&nbsp;R&nbsp;&nbsp;&nbsp;MUTE&nbsp;&nbsp;M</p>
+      </div>
+      <p id="menu-press" class="press">PRESS ENTER TO RACE</p>
+      <p class="foot">Beat 7 AI rivals on the Neon Loop. Boost pads glow amber. Stay on the asphalt.</p>
+    </div>
+
+    <div id="paused" class="screen" style="display: none">
+      <h1>PAUSED</h1>
+      <p class="tagline">P to resume &nbsp;·&nbsp; R to restart the race</p>
+    </div>
+
+    <div id="results" class="screen" style="display: none">
+      <h1 id="results-title">RACE COMPLETE</h1>
+      <p id="results-sub" class="tagline"></p>
+      <div id="results-table"></div>
+      <p id="results-press" class="press">PRESS R TO RACE AGAIN</p>
+    </div>
+
+    <div id="hint" aria-hidden="true">NEON RUSH · WASD drive · Shift drift · Space boost · P pause · R restart · M mute</div>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>
