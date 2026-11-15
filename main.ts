@@ -14,8 +14,20 @@
 // bytes, because the copy is a plain recursive copy in filesystem order and
 // the dossier is built purely from the copied files (no timestamps, no
 // random data, no network).
+//
+// Concurrency: the grader runs this program TWICE into the same output
+// directory, and the two runs may overlap in time. Two local repros proved
+// the failure modes of a naive copy: (1) a plain cpSync leaves a file
+// truncated while the other run's dossier builder reads it — a
+// three.module.min.js read as 0 bytes produced a wrong dossier with both
+// runs exiting 0; (2) deleting the target folders first (rmSync) races the
+// other run's copy and fails with ENOTEMPTY, and the other run then fails
+// with "game/index.html: no such file". So this program never deletes
+// anything the other run might read, and every file is installed atomically:
+// staged in a directory private to this process, then moved into place with
+// renameSync, which a reader only ever sees as a complete file.
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -38,30 +50,60 @@ const DOSSIER_OPTIONS = {
   game_path_max_bytes: 1000,
 };
 
+// Staging directory private to this process (its pid is unique per run).
+// It lives beside the output folders, never inside game/ or screenshots/,
+// so the dossier builder never sees it; it is removed before this program
+// exits, so the handed-in output holds exactly game/, screenshots/ and
+// dossier.json.
+const stageDir = join(outputDir, `.stage-${process.pid}`);
+let stagedCount = 0;
+
 function copyEntryFolder(name) {
   const source = join(repoRoot, name);
   const target = join(outputDir, name);
   if (!existsSync(source)) {
     throw new Error(`NEON RUSH: expected folder ${name}/ beside main.ts, but it is missing`);
   }
-  // The grader runs this program twice into the same output directory, and
-  // the first run's copies inherit the repository's read-only file modes, so
-  // a second copy over them would fail with EACCES. Clear the target first.
-  rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
-  cpSync(source, target, { recursive: true });
-  return readdirSync(target).length;
+  const walk = (srcDir, dstDir) => {
+    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+      const src = join(srcDir, entry.name);
+      const dst = join(dstDir, entry.name);
+      if (entry.isDirectory()) {
+        mkdirSync(dst, { recursive: true });
+        walk(src, dst);
+      } else if (entry.isFile()) {
+        // Stage the copy in this run's private directory, then move it into
+        // place: renameSync is atomic, so a concurrent run (or the dossier
+        // builder reading the output) only ever sees a complete file.
+        const staged = join(stageDir, `f${stagedCount++}`);
+        copyFileSync(src, staged);
+        renameSync(staged, dst);
+      }
+      // Anything else (a symlink or special file) is left out: the dossier
+      // refuses it anyway, and this entry holds plain files only.
+    }
+  };
+  walk(source, target);
+  return readdirSync(source).length;
 }
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(stageDir, { recursive: true });
 const gameEntries = copyEntryFolder('game');
 const shotEntries = copyEntryFolder('screenshots');
 
 const dossier = buildDossier(outputDir, DOSSIER_OPTIONS);
-// Same twice-into-one-output problem as the folders above: the first run's
-// dossier.json is read-only, so remove it before writing the new one.
-rmSync(join(outputDir, 'dossier.json'), { force: true });
-writeFileSync(join(outputDir, 'dossier.json'), dossier);
+// Same atomic move for the dossier itself: write it beside its final name,
+// then rename it into place, so a concurrent run never observes a
+// half-written dossier.json.
+const dossierStage = join(stageDir, 'dossier.json');
+writeFileSync(dossierStage, dossier);
+renameSync(dossierStage, join(outputDir, 'dossier.json'));
+
+// Only this run ever touches its staging directory; remove it so the
+// handed-in output holds exactly game/, screenshots/ and dossier.json.
+rmSync(stageDir, { recursive: true, force: true });
 
 console.log(
   `NEON RUSH: handed in ${gameEntries} game entries and ${shotEntries} screenshots to ${outputDir}`,
