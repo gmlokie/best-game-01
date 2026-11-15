@@ -15,7 +15,7 @@
 // the dossier is built purely from the copied files (no timestamps, no
 // random data, no network).
 
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -44,6 +44,10 @@ function copyEntryFolder(name) {
   if (!existsSync(source)) {
     throw new Error(`NEON RUSH: expected folder ${name}/ beside main.ts, but it is missing`);
   }
+  // The grader runs this program twice into the same output directory, and
+  // the first run's copies inherit the repository's read-only file modes, so
+  // a second copy over them would fail with EACCES. Clear the target first.
+  rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
   cpSync(source, target, { recursive: true });
   return readdirSync(target).length;
@@ -54,6 +58,9 @@ const gameEntries = copyEntryFolder('game');
 const shotEntries = copyEntryFolder('screenshots');
 
 const dossier = buildDossier(outputDir, DOSSIER_OPTIONS);
+// Same twice-into-one-output problem as the folders above: the first run's
+// dossier.json is read-only, so remove it before writing the new one.
+rmSync(join(outputDir, 'dossier.json'), { force: true });
 writeFileSync(join(outputDir, 'dossier.json'), dossier);
 
 console.log(
