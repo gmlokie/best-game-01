@@ -272,6 +272,11 @@ body {
   text-shadow: 0 0 30px rgba(255, 230, 109, 0.9);
 }
 
+.screen h1.lost {
+  color: #ff5e78;
+  text-shadow: 0 0 30px rgba(255, 94, 120, 0.9);
+}
+
 .screen h2 {
   margin: 6px 0 0;
   font-size: 24px;
@@ -376,4 +381,207 @@ body {
 #results-table .rtime {
   width: 110px;
   text-align: right;
+}
+
+/* ---------- Menu options (mode / track / difficulty) ---------- */
+.menu-options {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.opt-label {
+  width: 56px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 800;
+  color: #a89fd6;
+  letter-spacing: 0.08em;
+}
+
+.opt-btn {
+  padding: 7px 14px;
+  border: 2px solid rgba(34, 211, 238, 0.35);
+  border-radius: 8px;
+  background: rgba(7, 2, 19, 0.6);
+  color: #d9d2f5;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.opt-btn:hover {
+  border-color: #22d3ee;
+  color: #fff;
+}
+
+.opt-btn.sel {
+  border-color: #22d3ee;
+  background: rgba(34, 211, 238, 0.22);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.45);
+}
+
+.opt-btn.locked {
+  opacity: 0.45;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.league-note {
+  margin: 12px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffe66d;
+  min-height: 20px;
+}
+
+/* ---------- Season / champion screens ---------- */
+#season.screen,
+#champion.screen {
+  background: rgba(5, 2, 19, 0.82);
+}
+
+#season h1,
+#champion h1 {
+  font-size: 46px;
+}
+
+#season h2 {
+  margin-top: 18px;
+  font-size: 20px;
+}
+
+#season-table,
+#champion-table {
+  width: 620px;
+  max-width: 92vw;
+  margin-top: 12px;
+  text-align: left;
+}
+
+#season-table .row,
+#champion-table .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+#season-table .row.me,
+#champion-table .row.me {
+  background: rgba(34, 211, 238, 0.16);
+  font-weight: 800;
+  color: #fff;
+}
+
+#season-table .dot,
+#champion-table .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex: none;
+}
+
+#season-table .rpos,
+#champion-table .rpos {
+  width: 28px;
+}
+
+#season-table .rname,
+#champion-table .rname {
+  flex: 1;
+}
+
+#season-table .rpts,
+#champion-table .rpts {
+  width: 70px;
+  text-align: right;
+  color: #ffe66d;
+}
+
+#season-table .rwins,
+#champion-table .rwins {
+  width: 60px;
+  text-align: right;
+  color: #a89fd6;
+  font-size: 14px;
+}
+
+#shop {
+  width: 620px;
+  max-width: 92vw;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.shop-row .sname {
+  width: 110px;
+  flex: none;
+}
+
+.shop-row .sdesc {
+  flex: 1;
+  color: #a89fd6;
+  font-size: 13px;
+}
+
+.shop-row .spips {
+  color: #ffe66d;
+  letter-spacing: 0.2em;
+  flex: none;
+}
+
+.shop-row .sbuy {
+  flex: none;
+}
+
+.shop-row .sbuy:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---------- Wind + league HUD bits ---------- */
+#wind {
+  position: absolute;
+  left: 18px;
+  bottom: 180px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #aefcff;
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.8);
+}
+
+#league-line {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffe66d;
 }

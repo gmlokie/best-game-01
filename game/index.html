@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NEON RUSH — top-down synthwave circuit racing</title>
+    <title>NEON RUSH — real 3D synthwave circuit racing</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="style.css" />
     <script type="importmap">
@@ -21,11 +21,12 @@
       <div id="pos-block">
         <div id="pos">1st</div>
         <div id="pos-total">/ 8</div>
-        <div id="lap">LAP 1/3</div>
+        <div id="lap">LAP 1/5</div>
       </div>
       <div id="time-block">
         <div id="time">00:00.000</div>
         <div id="best">BEST LAP --:--.---</div>
+        <div id="league-line" style="display: none">PTS 0 · CR 0</div>
       </div>
       <div id="tower"><ol id="tower-list"></ol></div>
       <div id="speed-block">
@@ -35,6 +36,7 @@
         <div id="boost-bar"><div id="boost-fill"></div></div>
       </div>
       <div id="offtrack" style="display: none">OFF TRACK!</div>
+      <div id="wind" style="display: none">WIND →</div>
       <canvas id="minimap" width="210" height="130"></canvas>
     </div>
 
@@ -44,14 +46,35 @@
     <div id="menu" class="screen" style="display: none">
       <h1>NEON RUSH</h1>
       <h2>REAL 3D SYNTHWAVE CIRCUIT RACING</h2>
-      <p class="tagline">8 karts · 3 laps · drift to charge boost · first across the line wins</p>
+      <p class="tagline">8 karts · 3 tracks · drift to charge boost · first across the line wins</p>
+      <div class="menu-options">
+        <div class="opt-row">
+          <span class="opt-label">MODE</span>
+          <button data-mode="single" class="opt-btn" type="button">SINGLE RACE</button>
+          <button data-mode="league" class="opt-btn" type="button">NEON LEAGUE · 3 RACES</button>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">TRACK</span>
+          <button data-track="0" class="opt-btn" type="button">1 · NEON LOOP</button>
+          <button data-track="1" class="opt-btn" type="button">2 · SUNSET BAY</button>
+          <button data-track="2" class="opt-btn" type="button">3 · VOID CIRCUIT</button>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">AI</span>
+          <button data-diff="0" class="opt-btn" type="button">ROOKIE</button>
+          <button data-diff="1" class="opt-btn" type="button">PRO</button>
+          <button data-diff="2" class="opt-btn" type="button">LEGEND</button>
+        </div>
+      </div>
+      <p id="menu-league-note" class="league-note"></p>
       <div class="controls">
         <p>DRIVE&nbsp;&nbsp;WASD / Arrow keys&nbsp;&nbsp;&nbsp;BOOST&nbsp;&nbsp;Space (when the meter is lit)</p>
         <p>DRIFT&nbsp;&nbsp;Hold Shift through a corner, release for a burst</p>
         <p>PAUSE&nbsp;&nbsp;P&nbsp;&nbsp;&nbsp;RESTART&nbsp;&nbsp;R&nbsp;&nbsp;&nbsp;MUTE&nbsp;&nbsp;M</p>
+        <p>MENU&nbsp;&nbsp;M mode · T track · D difficulty (or click above)</p>
       </div>
       <p id="menu-press" class="press">PRESS ENTER TO RACE</p>
-      <p class="foot">Beat 7 AI rivals on the Neon Loop. Boost pads glow amber. Stay on the asphalt.</p>
+      <p class="foot">Beat 7 AI rivals on the Neon Loop. Boost pads glow amber and shift every lap. Stay on the asphalt.</p>
     </div>
 
     <div id="paused" class="screen" style="display: none">
@@ -64,6 +87,22 @@
       <p id="results-sub" class="tagline"></p>
       <div id="results-table"></div>
       <p id="results-press" class="press">PRESS R TO RACE AGAIN</p>
+    </div>
+
+    <div id="season" class="screen" style="display: none">
+      <h1 id="season-title">SEASON STANDINGS</h1>
+      <p id="season-sub" class="tagline"></p>
+      <div id="season-table"></div>
+      <h2 id="shop-title">GARAGE — SPEND CREDITS</h2>
+      <div id="shop"></div>
+      <p id="season-press" class="press">PRESS ENTER FOR THE NEXT RACE</p>
+    </div>
+
+    <div id="champion" class="screen" style="display: none">
+      <h1 id="champion-title">SEASON CHAMPION</h1>
+      <p id="champion-sub" class="tagline"></p>
+      <div id="champion-table"></div>
+      <p id="champion-press" class="press">PRESS R FOR THE MENU</p>
     </div>
 
     <div id="hint" aria-hidden="true">NEON RUSH · WASD drive · Shift drift · Space boost · P pause · R restart · M mute</div>
