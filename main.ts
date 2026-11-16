@@ -30,6 +30,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 // The repository root is the folder this file lives in.
@@ -50,12 +51,19 @@ const DOSSIER_OPTIONS = {
   game_path_max_bytes: 1000,
 };
 
-// Staging directory private to this process (its pid is unique per run).
+// Staging directory private to this process. The pid alone does NOT make it
+// private: the grader runs this program in separate containers, and in a
+// container whose entrypoint is node, the process IS pid 1 — so two
+// concurrent runs would both stage into `.stage-1` and collide when one
+// renames a staged file the other already moved (ENOENT, exit 1). A random
+// 64-bit token makes the directory unique per run. It is transient (removed
+// before exit) and never enters the dossier, so the handed-in bytes are
+// unaffected.
 // It lives beside the output folders, never inside game/ or screenshots/,
 // so the dossier builder never sees it; it is removed before this program
 // exits, so the handed-in output holds exactly game/, screenshots/ and
 // dossier.json.
-const stageDir = join(outputDir, `.stage-${process.pid}`);
+const stageDir = join(outputDir, `.stage-${process.pid}-${randomBytes(8).toString('hex')}`);
 let stagedCount = 0;
 
 function copyEntryFolder(name) {
